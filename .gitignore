@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# tmp file
+.cache
+.DS_Store
+*~
+.swp
+.ipynb_checkpoints
+
+# data files
+*.npy
+*.tar
+*.dat
+*.pkl
+
+# model file
+*.pth
+*.caffemodel
+*.prototxt
+*.onnx
+
