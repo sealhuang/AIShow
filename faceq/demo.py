@@ -228,7 +228,7 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         batch = np.concatenate([self.mat_img, sketch, stroke, mask, noise],
                                axis=3)
         start_t = time.time()
-        #result = self.model.demo(self.config, batch)
+        result = self.model.demo(self.config, batch)
         end_t = time.time()
         print('inference time : {}'.format(end_t-start_t))
         result = (result + 1) * 127.5
