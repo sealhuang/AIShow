@@ -23,15 +23,6 @@ class RecordVideo(QtCore.QObject):
         self.camera = cv2.VideoCapture(camera_port)
         self.timer = QtCore.QBasicTimer()
 
-        # load head outline
-        #head_outline = cv2.imread('./ui/head_outline.jpg')
-        #head_outline = head_outline[25:-125, 75:-75, :]
-        #head_outline = cv2.resize(head_outline, (512, 512),
-        #                          interpolation=cv2.INTER_CUBIC)
-        #head_outline[head_outline<75] = 0.5
-        #head_outline[head_outline>1] = 1
-        #self._head_outline = head_outline
-
     def start_recording(self):
         self.timer.start(0, self)
 
@@ -53,15 +44,14 @@ class RecordVideo(QtCore.QObject):
             frame = cv2.resize(frame, (512, 512),
                                interpolation=cv2.INTER_CUBIC)
 
-            # add head outline
-            #frame = frame * self._head_outline
-
             self.frame_data.emit(frame)
 
 
 class Ex(QtWidgets.QWidget, Ui_Form):
     def __init__(self, model, config):
         super().__init__()
+
+        self.get_head_outline()
 
         # start camera
         self.record_video = RecordVideo()
@@ -112,6 +102,16 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.dlg = QtWidgets.QColorDialog(self.graphicsView)
         self.color = None
 
+    def get_head_outline(self):
+        """load head outline."""
+        head_outline = cv2.imread('./ui/head_outline.jpg')
+        head_outline = head_outline[25:-125, 75:-75, :]
+        head_outline = cv2.resize(head_outline, (512, 512),
+                                  interpolation=cv2.INTER_CUBIC)
+        head_outline[head_outline<75] = 0.5
+        head_outline[head_outline>1] = 1
+        self._head_outline = head_outline
+
     def mode_select(self, mode):
         for i in range(len(self.modes)):
             self.modes[i] = 0
@@ -119,6 +119,10 @@ class Ex(QtWidgets.QWidget, Ui_Form):
 
     def camera_data_slot(self, frame_data):
         self._frame_data = frame_data
+
+        # add head outline
+        frame_data = frame_data * self._head_outline
+
         # convert data frame into QImage
         h, w, c = frame_data.shape
         bytes_per_line = 3 * w
