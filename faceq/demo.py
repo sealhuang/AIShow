@@ -23,6 +23,15 @@ class RecordVideo(QtCore.QObject):
         self.camera = cv2.VideoCapture(camera_port)
         self.timer = QtCore.QBasicTimer()
 
+        # load head outline
+        #head_outline = cv2.imread('./ui/head_outline.jpg')
+        #head_outline = head_outline[25:-125, 75:-75, :]
+        #head_outline = cv2.resize(head_outline, (512, 512),
+        #                          interpolation=cv2.INTER_CUBIC)
+        #head_outline[head_outline<75] = 0.5
+        #head_outline[head_outline>1] = 1
+        #self._head_outline = head_outline
+
     def start_recording(self):
         self.timer.start(0, self)
 
@@ -40,11 +49,13 @@ class RecordVideo(QtCore.QObject):
             frame = frame[:, 280:-280, :]
             # switch the left and right side
             frame = frame[:, ::-1, :]
-            # XXX: add face mask
-
             # resize to 512x512
             frame = cv2.resize(frame, (512, 512),
                                interpolation=cv2.INTER_CUBIC)
+
+            # add head outline
+            #frame = frame * self._head_outline
+
             self.frame_data.emit(frame)
 
 
