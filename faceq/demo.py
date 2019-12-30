@@ -20,7 +20,10 @@ class RecordVideo(QtCore.QObject):
 
     def __init__(self, camera_port=0, parent=None):
         super().__init__(parent)
+        #self.camera_port = camera_port
         self.camera = cv2.VideoCapture(camera_port)
+        self.camera.set(3, 1280)
+        self.camera.set(4, 720)
         self.timer = QtCore.QBasicTimer()
 
     def start_recording(self):
@@ -62,7 +65,7 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.show()
         self.model = model
         self.config = config
-        #self.model.load_demo_graph(config)
+        self.model.load_demo_graph(config)
 
         self.output_img = None
 
@@ -137,7 +140,8 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.scene.addPixmap(QtGui.QPixmap.fromImage(_frame_image))
 
     def capture(self):
-        self.record_video.end_recording()
+        #self.record_video.end_recording()
+        self.record_video.timer.stop()
         if self._frame_data is None:
             return
         
@@ -256,9 +260,9 @@ class Ex(QtWidgets.QWidget, Ui_Form):
             ],
             axis=2)
         qim = QtGui.QImage(result.data, result.shape[1], result.shape[0],
-                           result.strides[0], QImage.Format_RGB888)
+                           result.strides[0], QtGui.QImage.Format_RGB888)
         self.result_scene.removeItem(self.result_scene.items()[-1])
-        self.result_scene.addPixmap(QPixmap.fromImage(qim))
+        self.result_scene.addPixmap(QtGui.QPixmap.fromImage(qim))
 
     def make_noise(self):
         noise = np.zeros([512, 512, 1], dtype=np.uint8)
