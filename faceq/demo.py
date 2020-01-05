@@ -6,13 +6,138 @@ import time
 
 import numpy as np
 import cv2
+from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
+
+from faceinsight.detection import MTCNNDetector, show_bboxes
+from faceinsight.detection.align_trans import get_reference_facial_points
+from faceinsight.detection.align_trans import warp_and_crop_face
 
 from utils import Config
 from model import Model
 from ui.ui import Ui_Form
 from ui.mouse_event import GraphicsScene
+
+#-- face crop apis
+def get_square_crop_box(crop_box, box_scalar=1.0):
+    """Get square crop box based on bounding box and the expanding scalar.
+    Return square_crop_box and the square length.
+    """
+    center_w = int((crop_box[0] + crop_box[2]) / 2)
+    center_h = int((crop_box[1] + crop_box[3]) / 2)
+    w = crop_box[2] - crop_box[0]
+    h = crop_box[3] - crop_box[1]
+    box_len = max(w, h)
+    delta = int(box_len * box_scalar / 2)
+    square_crop_box = (center_w-delta, center_h-delta,
+                       center_w+delta+1, center_h+delta+1)
+    return square_crop_box, 2*delta+1
+
+def face_highlight(img, bounding_boxes, scalar):
+    """Give a highlight to the largest face in the image.
+
+    Return:
+        A face-highlighted version of input image.
+    """
+    img = img.astype('int32')
+    # filter real faces based on detection confidence
+    confidence_thresh = 0.85
+    filtered_idx = bounding_boxes[:, 4]>=confidence_thresh
+    filtered_bboxes = bounding_boxes[filtered_idx]
+
+    # if no faces found, return a darker image
+    if not len(filtered_bboxes):
+        return np.clip(img-50, 0, 255).astype('uint8')
+
+    nrof_faces = len(filtered_bboxes)
+
+    # detect multiple faces or not
+    det = filtered_bboxes[:, 0:4]
+    det_arr = []
+    img_size = np.asarray(img.shape)
+    if nrof_faces>1:
+        # if multiple faces found, we choose one face
+        # which is located center and has larger size
+        bounding_box_size = (det[:,2] - det[:,0]) * (det[:,3] - det[:,1])
+        img_center = img_size / 2
+        offsets = np.vstack([(det[:,0]+det[:,2])/2 - img_center[0],
+                             (det[:,1]+det[:,3])/2 - img_center[1]])
+        offset_dist_squared = np.sum(np.power(offsets, 2.0), 0)
+        # some extra weight on the centering
+        index = np.argmax(bounding_box_size - offset_dist_squared * 2.0)
+        det_arr.append(det[index, :])
+    else:
+        det_arr.append(np.squeeze(det))
+
+    det = np.squeeze(det_arr)
+    # compute expanding bounding box
+    bb, box_size = get_square_crop_box(det, scalar)
+    # get the valid pixel index of cropped face
+    face_left = np.maximum(bb[0], 0)
+    face_top = np.maximum(bb[1], 0)
+    face_right = np.minimum(bb[2], img_size[0])
+    face_bottom = np.minimum(bb[3], img_size[1])
+    highlight_mat = np.ones_like(img)
+    highlight_mat[face_top:face_bottom, face_left:face_right, :] = 0
+    
+    return np.clip(img-50*highlight_mat, 0, 255).astype('uint8')
+
+def crop_face(img, bounding_boxes, scalar):
+    """Crop face from input image.
+
+    Return:
+        cropped face image.
+    """
+    # filter real faces based on detection confidence
+    confidence_thresh = 0.85
+    filtered_idx = bounding_boxes[:, 4]>=confidence_thresh
+    filtered_bboxes = bounding_boxes[filtered_idx]
+
+    # if no faces found, return a darker image
+    if not len(filtered_bboxes):
+        return []
+
+    nrof_faces = len(filtered_bboxes)
+
+    # detect multiple faces or not
+    det = filtered_bboxes[:, 0:4]
+    det_arr = []
+    img_size = np.asarray(img.shape)
+    if nrof_faces>1:
+        # if multiple faces found, we choose one face
+        # which is located center and has larger size
+        bounding_box_size = (det[:,2] - det[:,0]) * (det[:,3] - det[:,1])
+        img_center = img_size / 2
+        offsets = np.vstack([(det[:,0]+det[:,2])/2 - img_center[0],
+                             (det[:,1]+det[:,3])/2 - img_center[1]])
+        offset_dist_squared = np.sum(np.power(offsets, 2.0), 0)
+        # some extra weight on the centering
+        index = np.argmax(bounding_box_size - offset_dist_squared * 2.0)
+        det_arr.append(det[index, :])
+    else:
+        det_arr.append(np.squeeze(det))
+
+    det = np.squeeze(det_arr)
+    # compute expanding bounding box
+    bb, box_size = get_square_crop_box(det, scalar)
+    # get the valid pixel index of cropped face
+    face_left = np.maximum(bb[0], 0)
+    face_top = np.maximum(bb[1], 0)
+    face_right = np.minimum(bb[2], img_size[0])
+    face_bottom = np.minimum(bb[3], img_size[1])
+    # cropped square image
+    new_img = Image.new('RGB', (box_size, box_size))
+    # fullfile the cropped image
+    img = Image.fromarray(img)
+    cropped = img.crop([face_left, face_top,
+                        face_right, face_bottom])
+    w_start_idx = np.maximum(-1*bb[0], 0)
+    h_start_idx = np.maximum(-1*bb[1], 0)
+    new_img.paste(cropped, (w_start_idx, h_start_idx))
+    new_img = new_img.resize((512, 512), Image.BILINEAR)
+    
+    return [np.array(new_img)]
 
 
 class RecordVideo(QtCore.QObject):
@@ -20,7 +145,6 @@ class RecordVideo(QtCore.QObject):
 
     def __init__(self, camera_port=0, parent=None):
         super().__init__(parent)
-        #self.camera_port = camera_port
         self.camera = cv2.VideoCapture(camera_port)
         self.camera.set(3, 1280)
         self.camera.set(4, 720)
@@ -43,9 +167,6 @@ class RecordVideo(QtCore.QObject):
             frame = frame[:, 280:-280, :]
             # switch the left and right side
             frame = frame[:, ::-1, :]
-            # resize to 512x512
-            frame = cv2.resize(frame, (512, 512),
-                               interpolation=cv2.INTER_CUBIC)
 
             self.frame_data.emit(frame)
 
@@ -54,18 +175,21 @@ class Ex(QtWidgets.QWidget, Ui_Form):
     def __init__(self, model, config):
         super().__init__()
 
-        self.get_head_outline()
+        #self.get_head_outline()
 
         # start camera
         self.record_video = RecordVideo()
         # connect the frame data signal and slot together
         self.record_video.frame_data.connect(self.camera_data_slot)
 
+        # start face detector
+        self.detector = MTCNNDetector(device='cpu')
+
         self.setupUi(self)
         self.show()
         self.model = model
         self.config = config
-        self.model.load_demo_graph(config)
+        #self.model.load_demo_graph(config)
 
         self.output_img = None
 
@@ -123,8 +247,19 @@ class Ex(QtWidgets.QWidget, Ui_Form):
     def camera_data_slot(self, frame_data):
         self._frame_data = frame_data
 
-        # add head outline
-        frame_data = frame_data * self._head_outline
+        # resize to 512x512
+        frame_data = cv2.resize(frame_data, (512, 512),
+                                interpolation=cv2.INTER_CUBIC)
+
+        # face detection
+        # BGR to RGB first
+        im = Image.fromarray(frame_data[:, :, ::-1])
+        bboxes, _ = self.detector.infer(im, min_face_size=200)
+        if len(bboxes):
+            frame_data = face_highlight(frame_data, bboxes, 1.2)
+        else:
+            frame_data = frame_data.astype('int32')
+            frame_data = np.clip(frame_data-50, 0, 255).astype('uint8')
 
         # convert data frame into QImage
         h, w, c = frame_data.shape
@@ -140,12 +275,24 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.scene.addPixmap(QtGui.QPixmap.fromImage(_frame_image))
 
     def capture(self):
-        #self.record_video.end_recording()
         self.record_video.timer.stop()
         if self._frame_data is None:
             return
-        
+       
+        # face detection
+        # BGR to RGB first
+        im = Image.fromarray(self._frame_data[:, :, ::-1])
+        bboxes, _ = self.detector.infer(im, min_face_size=200)
+        if len(bboxes):
+            faces = crop_face(self._frame_data, bboxes, 1.4)
+        else:
+            return
+
+        if len(faces)==0:
+            return
+
         # convert data frame into QImage
+        self._frame_data = faces[0]
         h, w, c = self._frame_data.shape
         bytes_per_line = 3 * w
         _frame_image = QtGui.QImage(self._frame_data.data, w, h,
