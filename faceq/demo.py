@@ -11,8 +11,6 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
 
 from faceinsight.detection import MTCNNDetector, show_bboxes
-from faceinsight.detection.align_trans import get_reference_facial_points
-from faceinsight.detection.align_trans import warp_and_crop_face
 
 from utils import Config
 from model import Model
