@@ -10,7 +10,7 @@ from PIL import Image
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
 
-from faceinsight.detection import MTCNNDetector, show_bboxes
+from faceinsight.detection import MTCNNDetector, show_bboxes, show_grids
 
 from utils import Config
 from model import Model
@@ -76,8 +76,18 @@ def face_highlight(img, bounding_boxes, scalar):
     face_top = np.maximum(bb[1], 0)
     face_right = np.minimum(bb[2], img_size[0])
     face_bottom = np.minimum(bb[3], img_size[1])
-    highlight_mat = np.ones_like(img)
-    highlight_mat[face_top:face_bottom, face_left:face_right, :] = 0
+
+    # highlight the face with circle
+    xx, yy = np.mgrid[:img_size[0], :img_size[1]]
+    center_x = int((bb[3] + bb[1])/2)
+    center_y = int((bb[2] + bb[0])/2)
+    circle_r2 = int(0.25 * box_size**2)
+    circle = (xx - center_x) ** 2 + (yy - center_y) ** 2
+    highlight_mat = circle > circle_r2
+    highlight_mat = np.repeat(np.expand_dims(highlight_mat, 2), 3, axis=2)
+    # highlight the face with square
+    #highlight_mat = np.ones_like(img)
+    #highlight_mat[face_top:face_bottom, face_left:face_right, :] = 0
     
     return np.clip(img-50*highlight_mat, 0, 255).astype('uint8')
 
@@ -98,7 +108,6 @@ def crop_face(img, bounding_boxes, scalar):
 
     nrof_faces = len(filtered_bboxes)
 
-    # detect multiple faces or not
     det = filtered_bboxes[:, 0:4]
     det_arr = []
     img_size = np.asarray(img.shape)
@@ -174,6 +183,7 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         super().__init__()
 
         #self.get_head_outline()
+        self._step_counter = 1
 
         # start camera
         self.record_video = RecordVideo()
@@ -187,7 +197,7 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.show()
         self.model = model
         self.config = config
-        #self.model.load_demo_graph(config)
+        self.model.load_demo_graph(config)
 
         self.output_img = None
 
@@ -243,6 +253,8 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         self.modes[mode] = 1
 
     def camera_data_slot(self, frame_data):
+        self._step_counter += 1
+
         self._frame_data = frame_data
 
         # resize to 512x512
@@ -252,8 +264,10 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         # face detection
         # BGR to RGB first
         im = Image.fromarray(frame_data[:, :, ::-1])
-        bboxes, _ = self.detector.infer(im, min_face_size=200)
+        bboxes, landmarks = self.detector.infer(im, min_face_size=200)
         if len(bboxes):
+            _img = show_grids(im, [], landmarks, step=self._step_counter%3)
+            frame_data  = np.array(_img)[:, :, ::-1]
             frame_data = face_highlight(frame_data, bboxes, 1.2)
         else:
             frame_data = frame_data.astype('int32')
@@ -283,17 +297,28 @@ class Ex(QtWidgets.QWidget, Ui_Form):
         bboxes, _ = self.detector.infer(im, min_face_size=200)
         if len(bboxes):
             faces = crop_face(self._frame_data, bboxes, 1.4)
+            #print(lmarks)
         else:
             return
 
         if len(faces)==0:
             return
 
+        # draw landmarks on display image
+        _face_img = Image.fromarray(faces[0][:, :, ::-1])
+        _, landmarks = self.detector.infer(_face_img, min_face_size=100)
+        #_face_img = show_bboxes(_face_img, [], landmarks)
+        _face_img = show_grids(_face_img, [], landmarks)
+        _face_img = np.array(_face_img)[:, :, ::-1]
+
         # convert data frame into QImage
         self._frame_data = faces[0]
         h, w, c = self._frame_data.shape
         bytes_per_line = 3 * w
-        _frame_image = QtGui.QImage(self._frame_data.data, w, h,
+        #_frame_image = QtGui.QImage(self._frame_data.data, w, h,
+        #                            bytes_per_line,
+        #                            QtGui.QImage.Format_RGB888)
+        _frame_image = QtGui.QImage(_face_img.copy(), w, h,
                                     bytes_per_line,
                                     QtGui.QImage.Format_RGB888)
         _frame_image = _frame_image.rgbSwapped()
